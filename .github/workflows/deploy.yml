@@ -1,0 +1,88 @@
+name: Deploy
+
+on:
+  push:
+    branches: [dev, staging, master]
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-config:
+    runs-on: ubuntu-latest
+    outputs:
+      config: ${{ steps.load.outputs.config }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - id: load
+        run: node scripts/ci/resolve-config.mjs "${{ github.ref_name }}"
+
+  deploy:
+    needs: resolve-config
+    runs-on: ubuntu-latest
+    environment: ${{ fromJSON(needs.resolve-config.outputs.config).org }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Salesforce CLI
+        run: npm install --global @salesforce/cli
+      - name: Install sfdx-git-delta
+        run: sf plugins install sfdx-git-delta
+
+      # Diff against the last commit this branch successfully deployed
+      # (tagged deployed/<branch>) rather than the previous push, so squash
+      # merges and force-pushes don't produce a bogus/incomplete delta. Falls
+      # back to the branch's root commit on first-ever deploy.
+      - name: Determine delta base
+        id: base
+        run: |
+          if git rev-parse "deployed/${{ github.ref_name }}" >/dev/null 2>&1; then
+            echo "ref=deployed/${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=$(git rev-list --max-parents=0 HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate delta
+        run: sf sgd:source:delta --to HEAD --from "${{ steps.base.outputs.ref }}" --output .delta --generate-delta
+
+      - name: Include Flow Tests for changed flows
+        if: fromJSON(needs.resolve-config.outputs.config).checks.flowTests
+        run: node scripts/ci/resolve-flow-tests.mjs
+
+      - name: Resolve impacted Apex tests
+        id: tests
+        if: fromJSON(needs.resolve-config.outputs.config).testLevel == 'RunSpecifiedTests'
+        run: node scripts/ci/resolve-tests.mjs
+
+      - name: Authenticate to target org
+        run: |
+          echo "${{ secrets.SFDX_AUTH_URL }}" > authfile
+          sf org login sfdx-url --sfdx-url-file authfile --alias target-org --set-default
+
+      - name: Deploy
+        run: |
+          LEVEL="${{ fromJSON(needs.resolve-config.outputs.config).testLevel }}"
+          if [ "$LEVEL" = "RunSpecifiedTests" ]; then
+            TESTS="${{ steps.tests.outputs.tests }}"
+            if [ -z "$TESTS" ]; then
+              echo "RunSpecifiedTests requested but no tests were resolved - failing closed."
+              exit 1
+            fi
+            sf project deploy start --source-dir .delta/force-app --test-level RunSpecifiedTests --tests "$TESTS" --wait 33
+          else
+            sf project deploy start --source-dir .delta/force-app --test-level "$LEVEL" --wait 33
+          fi
+
+      - name: Tag successful deploy
+        if: success()
+        run: |
+          git tag -f "deployed/${{ github.ref_name }}" HEAD
+          git push -f origin "deployed/${{ github.ref_name }}"

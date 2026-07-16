@@ -1,0 +1,32 @@
+{
+  "dev": {
+    "org": "qa",
+    "testLevel": "RunSpecifiedTests",
+    "checks": {
+      "staticAnalysis": true,
+      "secretScan": true,
+      "flowTests": true,
+      "apexValidation": true
+    }
+  },
+  "staging": {
+    "org": "uat",
+    "testLevel": "RunSpecifiedTests",
+    "checks": {
+      "staticAnalysis": true,
+      "secretScan": true,
+      "flowTests": true,
+      "apexValidation": true
+    }
+  },
+  "master": {
+    "org": "production",
+    "testLevel": "RunLocalTests",
+    "checks": {
+      "staticAnalysis": true,
+      "secretScan": true,
+      "flowTests": true,
+      "apexValidation": true
+    }
+  }
+}

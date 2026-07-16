@@ -1,0 +1,7 @@
+node_modules/
+.sf/
+.sfdx/
+.delta/
+*.log
+authfile
+.claude/

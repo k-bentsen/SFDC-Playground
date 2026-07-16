@@ -1,0 +1,154 @@
+name: PR Validate
+
+on:
+  pull_request:
+    branches: [dev, staging, master]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: validate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  resolve-config:
+    runs-on: ubuntu-latest
+    outputs:
+      config: ${{ steps.load.outputs.config }}
+      org: ${{ steps.load.outputs.org }}
+      testLevel: ${{ steps.load.outputs.testLevel }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - id: load
+        run: node scripts/ci/resolve-config.mjs "${{ github.base_ref }}"
+
+  delta:
+    needs: resolve-config
+    runs-on: ubuntu-latest
+    outputs:
+      hasChanges: ${{ steps.gen.outputs.hasChanges }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Salesforce CLI
+        run: npm install --global @salesforce/cli
+      - name: Install sfdx-git-delta
+        run: sf plugins install sfdx-git-delta
+      - name: Fetch base branch
+        run: git fetch origin "${{ github.base_ref }}" --depth=1
+      - id: gen
+        name: Generate delta
+        run: |
+          sf sgd:source:delta --to HEAD --from "origin/${{ github.base_ref }}" --output .delta --generate-delta
+          if [ -s .delta/package/package.xml ]; then
+            echo "hasChanges=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "hasChanges=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: delta
+          path: .delta
+
+  static-analysis:
+    needs: [resolve-config, delta]
+    if: fromJSON(needs.resolve-config.outputs.config).checks.staticAnalysis && needs.delta.outputs.hasChanges == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: delta
+          path: .delta
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Command/plugin name reflects Salesforce Code Analyzer as of this
+      # writing (PMD rules for Apex, ESLint for LWC/Aura). Confirm current
+      # plugin name and flags against `sf plugins` docs before relying on this
+      # - this surface has been renamed across CLI versions.
+      - name: Install Salesforce Code Analyzer
+        run: npm install --global @salesforce/cli @salesforce/plugin-code-analyzer
+      - name: Run analysis on changed files
+        run: sf code-analyzer run --workspace .delta/force-app --output-file analysis-results.json
+      - name: Show results on failure
+        if: failure()
+        run: cat analysis-results.json
+
+  secret-scan:
+    needs: resolve-config
+    if: fromJSON(needs.resolve-config.outputs.config).checks.secretScan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # gitleaks-action requires a license for private-repo use beyond its
+      # free tier - if that's a blocker, swap this step for the OSS gitleaks
+      # CLI directly: `gitleaks detect --source . --log-opts="origin/<base>..HEAD"`.
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-validate:
+    needs: [resolve-config, delta]
+    if: fromJSON(needs.resolve-config.outputs.config).checks.apexValidation && needs.delta.outputs.hasChanges == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ fromJSON(needs.resolve-config.outputs.config).org }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: delta
+          path: .delta
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Salesforce CLI
+        run: npm install --global @salesforce/cli
+      - name: Include Flow Tests for changed flows
+        if: fromJSON(needs.resolve-config.outputs.config).checks.flowTests
+        run: node scripts/ci/resolve-flow-tests.mjs
+      - name: Resolve impacted Apex tests
+        id: tests
+        if: fromJSON(needs.resolve-config.outputs.config).testLevel == 'RunSpecifiedTests'
+        run: node scripts/ci/resolve-tests.mjs
+      - name: Authenticate to target org
+        run: |
+          echo "${{ secrets.SFDX_AUTH_URL }}" > authfile
+          sf org login sfdx-url --sfdx-url-file authfile --alias target-org --set-default
+      - name: Validate deploy
+        run: |
+          LEVEL="${{ fromJSON(needs.resolve-config.outputs.config).testLevel }}"
+          if [ "$LEVEL" = "RunSpecifiedTests" ]; then
+            TESTS="${{ steps.tests.outputs.tests }}"
+            if [ -z "$TESTS" ]; then
+              echo "RunSpecifiedTests requested but no tests were resolved - failing closed."
+              exit 1
+            fi
+            sf project deploy validate --source-dir .delta/force-app --test-level RunSpecifiedTests --tests "$TESTS" --wait 33
+          else
+            sf project deploy validate --source-dir .delta/force-app --test-level "$LEVEL" --wait 33
+          fi
+
+  pr-gate:
+    needs: [static-analysis, secret-scan, deploy-validate]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate enabled check results
+        run: |
+          for result in "${{ needs.static-analysis.result }}" "${{ needs.secret-scan.result }}" "${{ needs.deploy-validate.result }}"; do
+            if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+              echo "A required check failed or was cancelled."
+              exit 1
+            fi
+          done
+          echo "All enabled checks passed (skipped checks are not blocking)."

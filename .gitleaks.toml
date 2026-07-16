@@ -1,0 +1,4 @@
+title = "SFDCDeploy gitleaks config"
+
+[extend]
+useDefault = true
