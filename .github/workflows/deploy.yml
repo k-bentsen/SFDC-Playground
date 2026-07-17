@@ -25,6 +25,11 @@ jobs:
     needs: resolve-config
     runs-on: ubuntu-latest
     environment: ${{ fromJSON(needs.resolve-config.outputs.config).org }}
+    # Default GITHUB_TOKEN is read-only on this repo; the "Tag successful
+    # deploy" step below needs to push a tag. Scope write access to just
+    # this job rather than changing the repo-wide Actions default.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
