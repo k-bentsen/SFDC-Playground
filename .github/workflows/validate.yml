@@ -143,10 +143,15 @@ jobs:
           if [ "$LEVEL" = "RunSpecifiedTests" ]; then
             TESTS="${{ steps.tests.outputs.tests }}"
             if [ -z "$TESTS" ]; then
-              echo "RunSpecifiedTests requested but no tests were resolved - failing closed."
-              exit 1
+              # resolve-tests.mjs already fails its own step (non-zero exit)
+              # when Apex changed with no covering test - reaching here with
+              # an empty list means the delta has no Apex at all, so there's
+              # genuinely nothing to test.
+              echo "No Apex in the delta - nothing to test."
+              sf project deploy validate --source-dir delta_output/force-app --test-level NoTestRun --wait 33
+            else
+              sf project deploy validate --source-dir delta_output/force-app --test-level RunSpecifiedTests --tests "$TESTS" --wait 33
             fi
-            sf project deploy validate --source-dir delta_output/force-app --test-level RunSpecifiedTests --tests "$TESTS" --wait 33
           else
             sf project deploy validate --source-dir delta_output/force-app --test-level "$LEVEL" --wait 33
           fi
