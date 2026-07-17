@@ -4,7 +4,13 @@
     "org": "qa",
     "testLevel": "RunSpecifiedTests",
     "checks": {
-      "staticAnalysis": true,
+      "staticAnalysis": {
+        "enabled": true,
+        "inlineComments": {
+          "enabled": true,
+          "minSeverity": "medium"
+        }
+      },
       "secretScan": true,
       "flowTests": true,
       "apexValidation": true
@@ -14,7 +20,13 @@
     "org": "uat",
     "testLevel": "RunSpecifiedTests",
     "checks": {
-      "staticAnalysis": true,
+      "staticAnalysis": {
+        "enabled": true,
+        "inlineComments": {
+          "enabled": true,
+          "minSeverity": "medium"
+        }
+      },
       "secretScan": true,
       "flowTests": true,
       "apexValidation": true
@@ -24,7 +36,13 @@
     "org": "production",
     "testLevel": "RunLocalTests",
     "checks": {
-      "staticAnalysis": true,
+      "staticAnalysis": {
+        "enabled": true,
+        "inlineComments": {
+          "enabled": true,
+          "minSeverity": "medium"
+        }
+      },
       "secretScan": true,
       "flowTests": true,
       "apexValidation": true

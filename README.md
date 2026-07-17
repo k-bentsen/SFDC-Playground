@@ -53,7 +53,13 @@ checks run:
     "org": "qa",
     "testLevel": "RunSpecifiedTests",
     "checks": {
-      "staticAnalysis": true,
+      "staticAnalysis": {
+        "enabled": true,
+        "inlineComments": {
+          "enabled": true,
+          "minSeverity": "medium"
+        }
+      },
       "secretScan": true,
       "flowTests": true,
       "apexValidation": true
@@ -61,6 +67,17 @@ checks run:
   }
 }
 ```
+
+`staticAnalysis` is the one check with sub-options rather than a plain
+boolean: `enabled` is the master toggle for the whole check (same as the
+other booleans), and `inlineComments` separately controls whether
+violations get posted as PR review comments on their specific line, not
+just the summary. `inlineComments.minSeverity` is one of `critical`,
+`high`, `medium`, `low`, `info` — it's a floor, not an exact match:
+`"medium"` comments on medium/high/critical, `"critical"` comments on
+critical only. Independent of both, the check still fails the PR on any
+critical/high violation in changed files, regardless of whether
+`inlineComments` is on.
 
 `sourceDir` is repo-wide (top-level, not per-branch) — it's the path both
 `validate.yml` and `deploy.yml` check for relevant changes before doing any
@@ -73,8 +90,9 @@ instead the `delta` job does a cheap `git diff --quiet` check against
 installs, delta generation, deploy) when there's nothing relevant - the
 workflow still starts, but exits in a few seconds rather than ~30s+.
 
-Flip a check to `false` for a given branch and its job is skipped on the next
-PR — no workflow-file edits needed. This works because `pr-gate` (the only
+Flip a check to `false` (or `staticAnalysis.enabled` to `false`) for a given
+branch and its job is skipped on the next PR — no workflow-file edits
+needed. This works because `pr-gate` (the only
 required status check) treats a skipped job as passing and only fails if an
 *executed* job failed. Individual check jobs are therefore never named
 directly in branch protection, so toggling them never breaks the required

@@ -97,7 +97,7 @@ jobs:
 
   static-analysis:
     needs: [resolve-config, delta]
-    if: fromJSON(needs.resolve-config.outputs.config).checks.staticAnalysis && needs.delta.outputs.hasChanges == 'true'
+    if: fromJSON(needs.resolve-config.outputs.config).checks.staticAnalysis.enabled && needs.delta.outputs.hasChanges == 'true'
     runs-on: ubuntu-latest
     # contents:read for checkout/artifact download; pull-requests:write for
     # the PR review comment forcedotcom/run-code-analyzer posts. Job-scoped
@@ -130,6 +130,20 @@ jobs:
           run-arguments: --workspace delta_output/force-app --view detail --output-file sfca_results.html --output-file sfca_results.json
           results-artifact-name: static-analysis-results
           github-token: ${{ secrets.GITHUB_TOKEN }}
+      # Posts a review comment on each violation's specific line, filtered
+      # to fromJSON(...).checks.staticAnalysis.inlineComments.minSeverity
+      # and above (critical/high/medium/low/info). Best-effort: a line
+      # outside this PR's diff can't be commented on inline by GitHub, see
+      # the script for the fallback behavior.
+      - name: Post inline PR comments
+        if: fromJSON(needs.resolve-config.outputs.config).checks.staticAnalysis.inlineComments.enabled
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MIN_SEVERITY: ${{ fromJSON(needs.resolve-config.outputs.config).checks.staticAnalysis.inlineComments.minSeverity }}
+          RESULTS_FILE: sfca_results.json
+        run: node scripts/ci/post-inline-comments.mjs
       # Only Sev1 (critical) / Sev2 (high) violations in changed files
       # block the PR; lower severities stay visible in the report (PR
       # comment / job summary / artifact above) without blocking merge.
