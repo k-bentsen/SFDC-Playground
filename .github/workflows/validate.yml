@@ -36,6 +36,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      # The npm version bundled with the runner's Node 20 image ships an
+      # undici build too old for current @salesforce/cli dependencies,
+      # producing "webidl.util.markAsUncloneable is not a function" during
+      # global install. Upgrading npm first avoids it.
+      - name: Upgrade npm
+        run: npm install --global npm@latest
       - name: Install Salesforce CLI
         run: npm install --global @salesforce/cli
       - name: Install sfdx-git-delta
@@ -73,6 +79,8 @@ jobs:
       # writing (PMD rules for Apex, ESLint for LWC/Aura). Confirm current
       # plugin name and flags against `sf plugins` docs before relying on this
       # - this surface has been renamed across CLI versions.
+      - name: Upgrade npm
+        run: npm install --global npm@latest
       - name: Install Salesforce Code Analyzer
         run: npm install --global @salesforce/cli @salesforce/plugin-code-analyzer
       - name: Run analysis on changed files
@@ -111,6 +119,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Upgrade npm
+        run: npm install --global npm@latest
       - name: Install Salesforce CLI
         run: npm install --global @salesforce/cli
       - name: Include Flow Tests for changed flows
@@ -139,13 +149,13 @@ jobs:
           fi
 
   pr-gate:
-    needs: [static-analysis, secret-scan, deploy-validate]
+    needs: [resolve-config, delta, static-analysis, secret-scan, deploy-validate]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Evaluate enabled check results
         run: |
-          for result in "${{ needs.static-analysis.result }}" "${{ needs.secret-scan.result }}" "${{ needs.deploy-validate.result }}"; do
+          for result in "${{ needs.resolve-config.result }}" "${{ needs.delta.result }}" "${{ needs.static-analysis.result }}" "${{ needs.secret-scan.result }}" "${{ needs.deploy-validate.result }}"; do
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
               echo "A required check failed or was cancelled."
               exit 1

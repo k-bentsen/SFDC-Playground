@@ -32,6 +32,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      # The npm version bundled with the runner's Node 20 image ships an
+      # undici build too old for current @salesforce/cli dependencies,
+      # producing "webidl.util.markAsUncloneable is not a function" during
+      # global install. Upgrading npm first avoids it.
+      - name: Upgrade npm
+        run: npm install --global npm@latest
       - name: Install Salesforce CLI
         run: npm install --global @salesforce/cli
       - name: Install sfdx-git-delta
