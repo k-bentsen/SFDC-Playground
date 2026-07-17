@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - id: load
         run: node scripts/ci/resolve-config.mjs "${{ github.base_ref }}"
 
@@ -35,26 +35,39 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Install Salesforce CLI
         run: npm install --global @salesforce/cli
+      # --force alone does not suppress the "isn't signed by Salesforce, do
+      # you trust it?" prompt on this plugin - pipe an answer directly in.
       - name: Install sfdx-git-delta
-        run: sf plugins install sfdx-git-delta
+        run: yes | sf plugins install sfdx-git-delta --force
+      # actions/checkout narrows the origin fetch refspec to just the PR's
+      # head branch, so a plain `git fetch origin <base>` only populates
+      # FETCH_HEAD, not refs/remotes/origin/<base> - sgd then can't resolve
+      # "origin/<base>" and silently diffs against nothing. Fetch into an
+      # explicit ref instead. Repo is already unshallowed (fetch-depth: 0
+      # above), so no --depth here.
       - name: Fetch base branch
-        run: git fetch origin "${{ github.base_ref }}" --depth=1
+        run: git fetch origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
       - id: gen
         name: Generate delta
         run: |
-          sf sgd:source:delta --to HEAD --from "origin/${{ github.base_ref }}" --output .delta --generate-delta
-          if [ -s .delta/package/package.xml ]; then
+          mkdir -p delta_output
+          sf sgd:source:delta --to HEAD --from "origin/${{ github.base_ref }}" --output-dir delta_output --generate-delta
+          if [ -s delta_output/package/package.xml ]; then
             echo "hasChanges=true" >> "$GITHUB_OUTPUT"
           else
             echo "hasChanges=false" >> "$GITHUB_OUTPUT"
           fi
+      # A leading-dot directory name (the original .delta) tripped up
+      # upload-artifact's internal file discovery - it reported "No files
+      # were found" even though the files verifiably existed on disk.
+      # delta_output (no leading dot) avoids that.
       - uses: actions/upload-artifact@v4
         with:
           name: delta
-          path: .delta
+          path: delta_output
 
   static-analysis:
     needs: [resolve-config, delta]
@@ -65,10 +78,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: delta
-          path: .delta
+          path: delta_output
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       # Command/plugin name reflects Salesforce Code Analyzer as of this
       # writing (PMD rules for Apex, ESLint for LWC/Aura). Confirm current
       # plugin name and flags against `sf plugins` docs before relying on this
@@ -76,7 +89,7 @@ jobs:
       - name: Install Salesforce Code Analyzer
         run: npm install --global @salesforce/cli @salesforce/plugin-code-analyzer
       - name: Run analysis on changed files
-        run: sf code-analyzer run --workspace .delta/force-app --output-file analysis-results.json
+        run: sf code-analyzer run --workspace delta_output/force-app --output-file analysis-results.json
       - name: Show results on failure
         if: failure()
         run: cat analysis-results.json
@@ -107,10 +120,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: delta
-          path: .delta
+          path: delta_output
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Install Salesforce CLI
         run: npm install --global @salesforce/cli
       - name: Include Flow Tests for changed flows
@@ -130,22 +143,30 @@ jobs:
           if [ "$LEVEL" = "RunSpecifiedTests" ]; then
             TESTS="${{ steps.tests.outputs.tests }}"
             if [ -z "$TESTS" ]; then
-              echo "RunSpecifiedTests requested but no tests were resolved - failing closed."
-              exit 1
+              # resolve-tests.mjs already fails its own step (non-zero exit)
+              # when Apex changed with no covering test - reaching here with
+              # an empty list means the delta has no Apex at all. NoTestRun
+              # is not a valid --test-level value on current sf CLI (only
+              # RunAllTestsInOrg/RunLocalTests/RunSpecifiedTests/
+              # RunRelevantTests are); per Salesforce docs, --test-level can
+              # simply be omitted when the deployment contains no Apex.
+              echo "No Apex in the delta - omitting --test-level."
+              sf project deploy validate --source-dir delta_output/force-app --wait 33
+            else
+              sf project deploy validate --source-dir delta_output/force-app --test-level RunSpecifiedTests --tests "$TESTS" --wait 33
             fi
-            sf project deploy validate --source-dir .delta/force-app --test-level RunSpecifiedTests --tests "$TESTS" --wait 33
           else
-            sf project deploy validate --source-dir .delta/force-app --test-level "$LEVEL" --wait 33
+            sf project deploy validate --source-dir delta_output/force-app --test-level "$LEVEL" --wait 33
           fi
 
   pr-gate:
-    needs: [static-analysis, secret-scan, deploy-validate]
+    needs: [resolve-config, delta, static-analysis, secret-scan, deploy-validate]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Evaluate enabled check results
         run: |
-          for result in "${{ needs.static-analysis.result }}" "${{ needs.secret-scan.result }}" "${{ needs.deploy-validate.result }}"; do
+          for result in "${{ needs.resolve-config.result }}" "${{ needs.delta.result }}" "${{ needs.static-analysis.result }}" "${{ needs.secret-scan.result }}" "${{ needs.deploy-validate.result }}"; do
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
               echo "A required check failed or was cancelled."
               exit 1

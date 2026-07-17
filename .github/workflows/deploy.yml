@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - id: load
         run: node scripts/ci/resolve-config.mjs "${{ github.ref_name }}"
 
@@ -31,11 +31,13 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Install Salesforce CLI
         run: npm install --global @salesforce/cli
+      # --force alone does not suppress the "isn't signed by Salesforce, do
+      # you trust it?" prompt on this plugin - pipe an answer directly in.
       - name: Install sfdx-git-delta
-        run: sf plugins install sfdx-git-delta
+        run: yes | sf plugins install sfdx-git-delta --force
 
       # Diff against the last commit this branch successfully deployed
       # (tagged deployed/<branch>) rather than the previous push, so squash
@@ -51,7 +53,9 @@ jobs:
           fi
 
       - name: Generate delta
-        run: sf sgd:source:delta --to HEAD --from "${{ steps.base.outputs.ref }}" --output .delta --generate-delta
+        run: |
+          mkdir -p delta_output
+          sf sgd:source:delta --to HEAD --from "${{ steps.base.outputs.ref }}" --output-dir delta_output --generate-delta
 
       - name: Include Flow Tests for changed flows
         if: fromJSON(needs.resolve-config.outputs.config).checks.flowTests
@@ -73,12 +77,20 @@ jobs:
           if [ "$LEVEL" = "RunSpecifiedTests" ]; then
             TESTS="${{ steps.tests.outputs.tests }}"
             if [ -z "$TESTS" ]; then
-              echo "RunSpecifiedTests requested but no tests were resolved - failing closed."
-              exit 1
+              # resolve-tests.mjs already fails its own step (non-zero exit)
+              # when Apex changed with no covering test - reaching here with
+              # an empty list means the delta has no Apex at all. NoTestRun
+              # is not a valid --test-level value on current sf CLI (only
+              # RunAllTestsInOrg/RunLocalTests/RunSpecifiedTests/
+              # RunRelevantTests are); per Salesforce docs, --test-level can
+              # simply be omitted when the deployment contains no Apex.
+              echo "No Apex in the delta - omitting --test-level."
+              sf project deploy start --source-dir delta_output/force-app --wait 33
+            else
+              sf project deploy start --source-dir delta_output/force-app --test-level RunSpecifiedTests --tests "$TESTS" --wait 33
             fi
-            sf project deploy start --source-dir .delta/force-app --test-level RunSpecifiedTests --tests "$TESTS" --wait 33
           else
-            sf project deploy start --source-dir .delta/force-app --test-level "$LEVEL" --wait 33
+            sf project deploy start --source-dir delta_output/force-app --test-level "$LEVEL" --wait 33
           fi
 
       - name: Tag successful deploy

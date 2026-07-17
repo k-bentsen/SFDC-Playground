@@ -22,9 +22,9 @@ import {
 } from 'node:fs';
 import { join, basename, dirname } from 'node:path';
 
-const DELTA_FLOWS_DIR = '.delta/force-app/main/default/flows';
+const DELTA_FLOWS_DIR = 'delta_output/force-app/main/default/flows';
 const REPO_FLOWTESTS_DIR = 'force-app/main/default/flowTests';
-const DELTA_FLOWTESTS_DIR = '.delta/force-app/main/default/flowTests';
+const DELTA_FLOWTESTS_DIR = 'delta_output/force-app/main/default/flowTests';
 
 function listFiles(dir, suffix) {
   if (!existsSync(dir)) return [];
