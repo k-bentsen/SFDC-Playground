@@ -55,10 +55,6 @@ function isTestName(name) {
   return /Test$/i.test(name) || /_Test$/i.test(name);
 }
 
-function isTestName(name) {
-  return /Test$/i.test(name) || /_Test$/i.test(name);
-}
-
 const changedClassNames = listFiles(DELTA_CLASSES_DIR, '.cls').map((f) => basename(f, '.cls'));
 const changedTriggerNames = listFiles(DELTA_TRIGGERS_DIR, '.trigger').map((f) => basename(f, '.trigger'));
 const changedApexNames = [...changedClassNames, ...changedTriggerNames];
