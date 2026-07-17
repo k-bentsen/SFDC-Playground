@@ -64,11 +64,15 @@ const comments = violations
   .filter((v) => v.severity <= threshold)
   .map((v) => {
     const loc = v.locations[v.primaryLocationIndex ?? 0];
+    // resources[0] is the rule's documentation URL, same link the summary
+    // table's rule column points to. Not every rule has one, so fall back
+    // to plain text rather than linking to nothing.
+    const ruleText = v.resources?.[0] ? `[${v.rule}](${v.resources[0]})` : v.rule;
     return {
       path: toRepoPath(loc.file),
       line: loc.startLine,
       side: 'RIGHT',
-      body: `**${SEVERITY_LABEL[v.severity] ?? v.severity} · ${v.rule}** (${v.engine})\n\n${v.message}`,
+      body: `**${SEVERITY_LABEL[v.severity] ?? v.severity} · ${ruleText}** (${v.engine})\n\n${v.message}`,
     };
   });
 
