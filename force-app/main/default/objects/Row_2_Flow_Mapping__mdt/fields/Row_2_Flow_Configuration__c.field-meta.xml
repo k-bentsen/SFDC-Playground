@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Row_2_Flow_Configuration__c</fullName>
+    <externalId>false</externalId>
+    <fieldManageability>DeveloperControlled</fieldManageability>
+    <label>Row 2 Flow Configuration</label>
+    <referenceTo>Row_2_Flow_Configuration__mdt</referenceTo>
+    <relationshipLabel>Row 2 Flow Mappings</relationshipLabel>
+    <relationshipName>Row_2_Flow_Mappings</relationshipName>
+    <required>false</required>
+    <type>MetadataRelationship</type>
+    <unique>false</unique>
+</CustomField>

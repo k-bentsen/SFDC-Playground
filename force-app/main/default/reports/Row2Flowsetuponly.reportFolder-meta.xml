@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ReportFolder xmlns="http://soap.sforce.com/2006/04/metadata">
+    <folderShares>
+        <accessLevel>Manage</accessLevel>
+        <sharedTo>Row2Flow_Test_Report_Access</sharedTo>
+        <sharedToType>Group</sharedToType>
+    </folderShares>
+    <name>Row 2 Flow (setup only)</name>
+</ReportFolder>
