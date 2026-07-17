@@ -53,7 +53,9 @@ jobs:
           fi
 
       - name: Generate delta
-        run: sf sgd:source:delta --to HEAD --from "${{ steps.base.outputs.ref }}" --output .delta --generate-delta
+        run: |
+          mkdir -p .delta
+          sf sgd:source:delta --to HEAD --from "${{ steps.base.outputs.ref }}" --output-dir .delta --generate-delta
 
       - name: Include Flow Tests for changed flows
         if: fromJSON(needs.resolve-config.outputs.config).checks.flowTests

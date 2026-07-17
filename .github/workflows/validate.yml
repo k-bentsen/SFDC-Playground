@@ -47,7 +47,8 @@ jobs:
       - id: gen
         name: Generate delta
         run: |
-          sf sgd:source:delta --to HEAD --from "origin/${{ github.base_ref }}" --output .delta --generate-delta
+          mkdir -p .delta
+          sf sgd:source:delta --to HEAD --from "origin/${{ github.base_ref }}" --output-dir .delta --generate-delta
           if [ -s .delta/package/package.xml ]; then
             echo "hasChanges=true" >> "$GITHUB_OUTPUT"
           else
