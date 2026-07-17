@@ -50,6 +50,16 @@ jobs:
       # above), so no --depth here.
       - name: Fetch base branch
         run: git fetch origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+      # Temporary: sgd is reporting "Success" with zero output files across
+      # multiple fix attempts, with no diagnostic detail. This isolates
+      # whether the two refs actually resolve/differ at the git level before
+      # sgd ever gets involved, to stop guessing blind. Remove once resolved.
+      - name: Debug refs
+        run: |
+          echo "origin/${{ github.base_ref }} = $(git rev-parse "origin/${{ github.base_ref }}")"
+          echo "HEAD = $(git rev-parse HEAD)"
+          echo "--- git diff --name-only ---"
+          git diff --name-only "origin/${{ github.base_ref }}" HEAD
       - id: gen
         name: Generate delta
         run: |
