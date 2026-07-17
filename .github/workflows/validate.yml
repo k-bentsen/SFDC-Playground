@@ -62,9 +62,13 @@ jobs:
           git diff --name-only "origin/${{ github.base_ref }}" HEAD
       - id: gen
         name: Generate delta
+        env:
+          DEBUG: sfdx-git-delta
         run: |
           mkdir -p .delta
           sf sgd:source:delta --to HEAD --from "origin/${{ github.base_ref }}" --output-dir .delta --generate-delta
+          echo "--- .delta contents ---"
+          find .delta -type f
           if [ -s .delta/package/package.xml ]; then
             echo "hasChanges=true" >> "$GITHUB_OUTPUT"
           else
