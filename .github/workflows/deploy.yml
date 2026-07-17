@@ -79,10 +79,13 @@ jobs:
             if [ -z "$TESTS" ]; then
               # resolve-tests.mjs already fails its own step (non-zero exit)
               # when Apex changed with no covering test - reaching here with
-              # an empty list means the delta has no Apex at all, so there's
-              # genuinely nothing to test.
-              echo "No Apex in the delta - nothing to test."
-              sf project deploy start --source-dir delta_output/force-app --test-level NoTestRun --wait 33
+              # an empty list means the delta has no Apex at all. NoTestRun
+              # is not a valid --test-level value on current sf CLI (only
+              # RunAllTestsInOrg/RunLocalTests/RunSpecifiedTests/
+              # RunRelevantTests are); per Salesforce docs, --test-level can
+              # simply be omitted when the deployment contains no Apex.
+              echo "No Apex in the delta - omitting --test-level."
+              sf project deploy start --source-dir delta_output/force-app --wait 33
             else
               sf project deploy start --source-dir delta_output/force-app --test-level RunSpecifiedTests --tests "$TESTS" --wait 33
             fi
