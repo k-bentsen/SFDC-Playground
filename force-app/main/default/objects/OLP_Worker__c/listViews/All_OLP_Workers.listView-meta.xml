@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ListView xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>All_OLP_Workers</fullName>
+    <columns>NAME</columns>
+    <columns>DML_Operation__c</columns>
+    <columns>JSON_Parameters__c</columns>
+    <columns>Class__c</columns>
+    <columns>Flow__c</columns>
+    <columns>Type__c</columns>
+    <columns>CREATEDBY_USER</columns>
+    <filterScope>Everything</filterScope>
+    <label>All OLP Workers</label>
+</ListView>
