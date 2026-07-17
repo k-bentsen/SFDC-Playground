@@ -42,8 +42,14 @@ jobs:
       # you trust it?" prompt on this plugin - pipe an answer directly in.
       - name: Install sfdx-git-delta
         run: yes | sf plugins install sfdx-git-delta --force
+      # actions/checkout narrows the origin fetch refspec to just the PR's
+      # head branch, so a plain `git fetch origin <base>` only populates
+      # FETCH_HEAD, not refs/remotes/origin/<base> - sgd then can't resolve
+      # "origin/<base>" and silently diffs against nothing. Fetch into an
+      # explicit ref instead. Repo is already unshallowed (fetch-depth: 0
+      # above), so no --depth here.
       - name: Fetch base branch
-        run: git fetch origin "${{ github.base_ref }}" --depth=1
+        run: git fetch origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
       - id: gen
         name: Generate delta
         run: |
