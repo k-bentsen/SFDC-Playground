@@ -88,7 +88,12 @@ Flow Test metadata in the deploy package.
 ## Checks
 
 - **static-analysis** — Salesforce Code Analyzer (PMD for Apex, ESLint for
-  LWC/Aura), scoped to the delta.
+  LWC/Aura), scoped to the delta, via the official
+  `forcedotcom/run-code-analyzer` action. Posts a PR review comment
+  summarizing violations, publishes the full detail view as a GitHub
+  Actions job summary, and uploads an HTML/JSON report as a workflow
+  artifact. Only blocks the PR on Sev1 (critical) or Sev2 (high) violations
+  in changed files — lower severities are visible but non-blocking.
 - **secret-scan** — gitleaks over the PR's diff range.
 - **deploy-validate** — `sf project deploy validate` against the delta
   package, running Apex tests at the branch's configured test level.
