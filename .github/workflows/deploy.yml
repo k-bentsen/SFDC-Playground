@@ -113,7 +113,11 @@ jobs:
               echo "No Apex in the delta - omitting --test-level."
               sf project deploy start --source-dir delta_output/force-app --wait 33
             else
-              sf project deploy start --source-dir delta_output/force-app --test-level RunSpecifiedTests --tests "$TESTS" --wait 33
+              # $TESTS is intentionally unquoted: resolve-tests.mjs emits
+              # space-separated names, and current sf CLI expects --tests
+              # as space-separated names (a single quoted/comma-joined
+              # string is treated as one nonexistent test name).
+              sf project deploy start --source-dir delta_output/force-app --test-level RunSpecifiedTests --tests $TESTS --wait 33
             fi
           else
             sf project deploy start --source-dir delta_output/force-app --test-level "$LEVEL" --wait 33

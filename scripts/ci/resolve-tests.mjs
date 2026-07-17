@@ -42,9 +42,17 @@ function listFiles(dir, ext) {
 }
 
 function writeOutput(tests) {
-  console.log(tests.length ? `Resolved tests: ${tests.join(',')}` : 'No Apex changes in delta; no tests required.');
+  // Space-separated, not comma-separated: current sf CLI versions read
+  // --tests as one or more space-separated names (or repeated --tests
+  // flags) - a comma-joined value gets treated as a single, nonexistent
+  // test name, silently running zero tests.
+  console.log(tests.length ? `Resolved tests: ${tests.join(' ')}` : 'No Apex changes in delta; no tests required.');
   const output = process.env.GITHUB_OUTPUT;
-  if (output) appendFileSync(output, `tests=${tests.join(',')}\n`);
+  if (output) appendFileSync(output, `tests=${tests.join(' ')}\n`);
+}
+
+function isTestName(name) {
+  return /Test$/i.test(name) || /_Test$/i.test(name);
 }
 
 function isTestName(name) {
