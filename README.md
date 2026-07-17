@@ -106,5 +106,5 @@ To see what a PR's delta would contain without running CI:
 
 ```
 git fetch origin dev
-sf sgd:source:delta --to HEAD --from origin/dev --output .delta --generate-delta
+sf sgd:source:delta --to HEAD --from origin/dev --output-dir delta_output --generate-delta
 ```

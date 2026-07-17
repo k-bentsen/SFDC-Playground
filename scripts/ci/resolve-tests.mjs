@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Resolves which Apex test classes cover the Apex changed in the delta package
-// (`sf sgd:source:delta` output under .delta/). Matching is naming-convention
+// (`sf sgd:source:delta` output under delta_output/). Matching is naming-convention
 // first (Foo.cls -> FooTest.cls / Foo_Test.cls), then falls back to grepping
 // every test class in the repo for a reference to the changed class/trigger
 // name, so shared utility classes and trigger handlers still get covered
@@ -13,8 +13,8 @@
 import { readdirSync, readFileSync, existsSync, appendFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
 
-const DELTA_CLASSES_DIR = '.delta/force-app/main/default/classes';
-const DELTA_TRIGGERS_DIR = '.delta/force-app/main/default/triggers';
+const DELTA_CLASSES_DIR = 'delta_output/force-app/main/default/classes';
+const DELTA_TRIGGERS_DIR = 'delta_output/force-app/main/default/triggers';
 const REPO_CLASSES_DIR = 'force-app/main/default/classes';
 
 function listFiles(dir, ext) {

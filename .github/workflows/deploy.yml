@@ -54,8 +54,8 @@ jobs:
 
       - name: Generate delta
         run: |
-          mkdir -p .delta
-          sf sgd:source:delta --to HEAD --from "${{ steps.base.outputs.ref }}" --output-dir .delta --generate-delta
+          mkdir -p delta_output
+          sf sgd:source:delta --to HEAD --from "${{ steps.base.outputs.ref }}" --output-dir delta_output --generate-delta
 
       - name: Include Flow Tests for changed flows
         if: fromJSON(needs.resolve-config.outputs.config).checks.flowTests
@@ -80,9 +80,9 @@ jobs:
               echo "RunSpecifiedTests requested but no tests were resolved - failing closed."
               exit 1
             fi
-            sf project deploy start --source-dir .delta/force-app --test-level RunSpecifiedTests --tests "$TESTS" --wait 33
+            sf project deploy start --source-dir delta_output/force-app --test-level RunSpecifiedTests --tests "$TESTS" --wait 33
           else
-            sf project deploy start --source-dir .delta/force-app --test-level "$LEVEL" --wait 33
+            sf project deploy start --source-dir delta_output/force-app --test-level "$LEVEL" --wait 33
           fi
 
       - name: Tag successful deploy

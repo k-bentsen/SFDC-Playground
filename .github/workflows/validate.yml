@@ -50,34 +50,24 @@ jobs:
       # above), so no --depth here.
       - name: Fetch base branch
         run: git fetch origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
-      # Temporary: sgd is reporting "Success" with zero output files across
-      # multiple fix attempts, with no diagnostic detail. This isolates
-      # whether the two refs actually resolve/differ at the git level before
-      # sgd ever gets involved, to stop guessing blind. Remove once resolved.
-      - name: Debug refs
-        run: |
-          echo "origin/${{ github.base_ref }} = $(git rev-parse "origin/${{ github.base_ref }}")"
-          echo "HEAD = $(git rev-parse HEAD)"
-          echo "--- git diff --name-only ---"
-          git diff --name-only "origin/${{ github.base_ref }}" HEAD
       - id: gen
         name: Generate delta
-        env:
-          DEBUG: sfdx-git-delta
         run: |
-          mkdir -p .delta
-          sf sgd:source:delta --to HEAD --from "origin/${{ github.base_ref }}" --output-dir .delta --generate-delta
-          echo "--- .delta contents ---"
-          find .delta -type f
-          if [ -s .delta/package/package.xml ]; then
+          mkdir -p delta_output
+          sf sgd:source:delta --to HEAD --from "origin/${{ github.base_ref }}" --output-dir delta_output --generate-delta
+          if [ -s delta_output/package/package.xml ]; then
             echo "hasChanges=true" >> "$GITHUB_OUTPUT"
           else
             echo "hasChanges=false" >> "$GITHUB_OUTPUT"
           fi
+      # A leading-dot directory name (the original .delta) tripped up
+      # upload-artifact's internal file discovery - it reported "No files
+      # were found" even though the files verifiably existed on disk.
+      # delta_output (no leading dot) avoids that.
       - uses: actions/upload-artifact@v4
         with:
           name: delta
-          path: .delta
+          path: delta_output
 
   static-analysis:
     needs: [resolve-config, delta]
@@ -88,7 +78,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: delta
-          path: .delta
+          path: delta_output
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -99,7 +89,7 @@ jobs:
       - name: Install Salesforce Code Analyzer
         run: npm install --global @salesforce/cli @salesforce/plugin-code-analyzer
       - name: Run analysis on changed files
-        run: sf code-analyzer run --workspace .delta/force-app --output-file analysis-results.json
+        run: sf code-analyzer run --workspace delta_output/force-app --output-file analysis-results.json
       - name: Show results on failure
         if: failure()
         run: cat analysis-results.json
@@ -130,7 +120,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: delta
-          path: .delta
+          path: delta_output
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -156,9 +146,9 @@ jobs:
               echo "RunSpecifiedTests requested but no tests were resolved - failing closed."
               exit 1
             fi
-            sf project deploy validate --source-dir .delta/force-app --test-level RunSpecifiedTests --tests "$TESTS" --wait 33
+            sf project deploy validate --source-dir delta_output/force-app --test-level RunSpecifiedTests --tests "$TESTS" --wait 33
           else
-            sf project deploy validate --source-dir .delta/force-app --test-level "$LEVEL" --wait 33
+            sf project deploy validate --source-dir delta_output/force-app --test-level "$LEVEL" --wait 33
           fi
 
   pr-gate:
