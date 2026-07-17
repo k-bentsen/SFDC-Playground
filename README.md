@@ -48,6 +48,7 @@ checks run:
 
 ```json
 {
+  "sourceDir": "force-app",
   "dev": {
     "org": "qa",
     "testLevel": "RunSpecifiedTests",
@@ -60,6 +61,17 @@ checks run:
   }
 }
 ```
+
+`sourceDir` is repo-wide (top-level, not per-branch) — it's the path both
+`validate.yml` and `deploy.yml` check for relevant changes before doing any
+of the expensive CLI/plugin install work, and defaults to `force-app` if
+omitted. Change it if your SFDX package directory uses a different name.
+Note this can't be a hard trigger filter: GitHub's native `on: paths:` is
+evaluated statically before any job runs and can't read a config file, so
+instead the `delta` job does a cheap `git diff --quiet` check against
+`sourceDir` as its first real step and skips everything after it (CLI
+installs, delta generation, deploy) when there's nothing relevant - the
+workflow still starts, but exits in a few seconds rather than ~30s+.
 
 Flip a check to `false` for a given branch and its job is skipped on the next
 PR — no workflow-file edits needed. This works because `pr-gate` (the only

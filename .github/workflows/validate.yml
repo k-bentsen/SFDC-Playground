@@ -33,15 +33,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Install Salesforce CLI
-        run: npm install --global @salesforce/cli
-      # --force alone does not suppress the "isn't signed by Salesforce, do
-      # you trust it?" prompt on this plugin - pipe an answer directly in.
-      - name: Install sfdx-git-delta
-        run: yes | sf plugins install sfdx-git-delta --force
       # actions/checkout narrows the origin fetch refspec to just the PR's
       # head branch, so a plain `git fetch origin <base>` only populates
       # FETCH_HEAD, not refs/remotes/origin/<base> - sgd then can't resolve
@@ -50,12 +41,46 @@ jobs:
       # above), so no --depth here.
       - name: Fetch base branch
         run: git fetch origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+      # Cheap check before any of the expensive CLI/plugin installs below:
+      # if nothing under the configured source directory changed, there's
+      # nothing for sgd to find either. sourceDir is configurable via
+      # .github/ci-config.json for non-default SFDX layouts.
+      - id: check
+        name: Check for relevant changes
+        run: |
+          SOURCE_DIR="${{ fromJSON(needs.resolve-config.outputs.config).sourceDir }}"
+          if git diff --quiet "origin/${{ github.base_ref }}" HEAD -- "$SOURCE_DIR"; then
+            echo "No changes under $SOURCE_DIR."
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.relevant == 'true'
+        with:
+          node-version: 22
+      - name: Install Salesforce CLI
+        if: steps.check.outputs.relevant == 'true'
+        run: npm install --global @salesforce/cli
+      # --force alone does not suppress the "isn't signed by Salesforce, do
+      # you trust it?" prompt on this plugin - pipe an answer directly in.
+      - name: Install sfdx-git-delta
+        if: steps.check.outputs.relevant == 'true'
+        run: yes | sf plugins install sfdx-git-delta --force
       - id: gen
         name: Generate delta
         run: |
+          if [ "${{ steps.check.outputs.relevant }}" != "true" ]; then
+            echo "hasChanges=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           mkdir -p delta_output
           sf sgd:source:delta --to HEAD --from "origin/${{ github.base_ref }}" --output-dir delta_output --generate-delta
-          if [ -s delta_output/package/package.xml ]; then
+          # sgd always writes a well-formed package.xml (with just the XML
+          # boilerplate) even when zero components changed, so checking
+          # file existence/non-emptiness is never a reliable signal - check
+          # for an actual <types> entry instead.
+          if grep -q '<types>' delta_output/package/package.xml 2>/dev/null || grep -q '<types>' delta_output/destructiveChanges/destructiveChanges.xml 2>/dev/null; then
             echo "hasChanges=true" >> "$GITHUB_OUTPUT"
           else
             echo "hasChanges=false" >> "$GITHUB_OUTPUT"
@@ -65,6 +90,7 @@ jobs:
       # were found" even though the files verifiably existed on disk.
       # delta_output (no leading dot) avoids that.
       - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.relevant == 'true'
         with:
           name: delta
           path: delta_output

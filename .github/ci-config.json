@@ -1,4 +1,5 @@
 {
+  "sourceDir": "force-app",
   "dev": {
     "org": "qa",
     "testLevel": "RunSpecifiedTests",
