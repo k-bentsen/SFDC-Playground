@@ -35,7 +35,7 @@ jobs:
       - name: Install Salesforce CLI
         run: npm install --global @salesforce/cli
       - name: Install sfdx-git-delta
-        run: sf plugins install sfdx-git-delta
+        run: sf plugins install sfdx-git-delta --force
 
       # Diff against the last commit this branch successfully deployed
       # (tagged deployed/<branch>) rather than the previous push, so squash
