@@ -25,20 +25,15 @@ jobs:
     needs: resolve-config
     runs-on: ubuntu-latest
     environment: ${{ fromJSON(needs.resolve-config.outputs.config).org }}
+    # Default GITHUB_TOKEN is read-only on this repo; the "Tag successful
+    # deploy" step below needs to push a tag. Scope write access to just
+    # this job rather than changing the repo-wide Actions default.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Install Salesforce CLI
-        run: npm install --global @salesforce/cli
-      # --force alone does not suppress the "isn't signed by Salesforce, do
-      # you trust it?" prompt on this plugin - pipe an answer directly in.
-      - name: Install sfdx-git-delta
-        run: yes | sf plugins install sfdx-git-delta --force
-
       # Diff against the last commit this branch successfully deployed
       # (tagged deployed/<branch>) rather than the previous push, so squash
       # merges and force-pushes don't produce a bogus/incomplete delta. Falls
@@ -52,26 +47,57 @@ jobs:
             echo "ref=$(git rev-list --max-parents=0 HEAD)" >> "$GITHUB_OUTPUT"
           fi
 
+      # Cheap check before any of the expensive CLI/plugin installs below:
+      # if nothing under the configured source directory changed, there's
+      # nothing for sgd to find either. sourceDir is configurable via
+      # .github/ci-config.json for non-default SFDX layouts.
+      - id: check
+        name: Check for relevant changes
+        run: |
+          SOURCE_DIR="${{ fromJSON(needs.resolve-config.outputs.config).sourceDir }}"
+          if git diff --quiet "${{ steps.base.outputs.ref }}" HEAD -- "$SOURCE_DIR"; then
+            echo "No changes under $SOURCE_DIR."
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.relevant == 'true'
+        with:
+          node-version: 22
+      - name: Install Salesforce CLI
+        if: steps.check.outputs.relevant == 'true'
+        run: npm install --global @salesforce/cli
+      # --force alone does not suppress the "isn't signed by Salesforce, do
+      # you trust it?" prompt on this plugin - pipe an answer directly in.
+      - name: Install sfdx-git-delta
+        if: steps.check.outputs.relevant == 'true'
+        run: yes | sf plugins install sfdx-git-delta --force
+
       - name: Generate delta
+        if: steps.check.outputs.relevant == 'true'
         run: |
           mkdir -p delta_output
           sf sgd:source:delta --to HEAD --from "${{ steps.base.outputs.ref }}" --output-dir delta_output --generate-delta
 
       - name: Include Flow Tests for changed flows
-        if: fromJSON(needs.resolve-config.outputs.config).checks.flowTests
+        if: steps.check.outputs.relevant == 'true' && fromJSON(needs.resolve-config.outputs.config).checks.flowTests
         run: node scripts/ci/resolve-flow-tests.mjs
 
       - name: Resolve impacted Apex tests
         id: tests
-        if: fromJSON(needs.resolve-config.outputs.config).testLevel == 'RunSpecifiedTests'
+        if: steps.check.outputs.relevant == 'true' && fromJSON(needs.resolve-config.outputs.config).testLevel == 'RunSpecifiedTests'
         run: node scripts/ci/resolve-tests.mjs
 
       - name: Authenticate to target org
+        if: steps.check.outputs.relevant == 'true'
         run: |
           echo "${{ secrets.SFDX_AUTH_URL }}" > authfile
           sf org login sfdx-url --sfdx-url-file authfile --alias target-org --set-default
 
       - name: Deploy
+        if: steps.check.outputs.relevant == 'true'
         run: |
           LEVEL="${{ fromJSON(needs.resolve-config.outputs.config).testLevel }}"
           if [ "$LEVEL" = "RunSpecifiedTests" ]; then
@@ -93,6 +119,8 @@ jobs:
             sf project deploy start --source-dir delta_output/force-app --test-level "$LEVEL" --wait 33
           fi
 
+      # Advance the tag even when nothing relevant changed, so the next
+      # deploy's diff base doesn't keep accumulating already-skipped commits.
       - name: Tag successful deploy
         if: success()
         run: |
