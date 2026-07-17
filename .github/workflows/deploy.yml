@@ -34,8 +34,10 @@ jobs:
           node-version: 22
       - name: Install Salesforce CLI
         run: npm install --global @salesforce/cli
+      # --force alone does not suppress the "isn't signed by Salesforce, do
+      # you trust it?" prompt on this plugin - pipe an answer directly in.
       - name: Install sfdx-git-delta
-        run: sf plugins install sfdx-git-delta --force
+        run: yes | sf plugins install sfdx-git-delta --force
 
       # Diff against the last commit this branch successfully deployed
       # (tagged deployed/<branch>) rather than the previous push, so squash
