@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - id: load
         run: node scripts/ci/resolve-config.mjs "${{ github.base_ref }}"
 
@@ -35,13 +35,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-      # The npm version bundled with the runner's Node 20 image ships an
-      # undici build too old for current @salesforce/cli dependencies,
-      # producing "webidl.util.markAsUncloneable is not a function" during
-      # global install. Upgrading npm first avoids it.
-      - name: Upgrade npm
-        run: npm install --global npm@latest
+          node-version: 22
       - name: Install Salesforce CLI
         run: npm install --global @salesforce/cli
       - name: Install sfdx-git-delta
@@ -74,13 +68,11 @@ jobs:
           path: .delta
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       # Command/plugin name reflects Salesforce Code Analyzer as of this
       # writing (PMD rules for Apex, ESLint for LWC/Aura). Confirm current
       # plugin name and flags against `sf plugins` docs before relying on this
       # - this surface has been renamed across CLI versions.
-      - name: Upgrade npm
-        run: npm install --global npm@latest
       - name: Install Salesforce Code Analyzer
         run: npm install --global @salesforce/cli @salesforce/plugin-code-analyzer
       - name: Run analysis on changed files
@@ -118,9 +110,7 @@ jobs:
           path: .delta
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-      - name: Upgrade npm
-        run: npm install --global npm@latest
+          node-version: 22
       - name: Install Salesforce CLI
         run: npm install --global @salesforce/cli
       - name: Include Flow Tests for changed flows
