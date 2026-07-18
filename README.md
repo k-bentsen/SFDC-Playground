@@ -112,12 +112,20 @@ Flow Test metadata in the deploy package.
 ## Checks
 
 - **static-analysis** — Salesforce Code Analyzer (PMD for Apex, ESLint for
-  LWC/Aura), scoped to the delta, via the official
-  `forcedotcom/run-code-analyzer` action. Posts a PR review comment
-  summarizing violations, publishes the full detail view as a GitHub
-  Actions job summary, and uploads an HTML/JSON report as a workflow
-  artifact. Only blocks the PR on Sev1 (critical) or Sev2 (high) violations
-  in changed files — lower severities are visible but non-blocking.
+  LWC/Aura), via the official `forcedotcom/run-code-analyzer` action. Scans
+  the real checkout at `sourceDir` (not a delta copy) — the action's
+  "violations in changed files" outputs work by cross-referencing scanned
+  file paths against GitHub's actual PR-changed-files list, which only
+  works if the paths match. Posts a PR review comment summarizing
+  violations, publishes the full detail view as a GitHub Actions job
+  summary, and uploads an HTML/JSON report as a workflow artifact. Only
+  blocks the PR on Sev1 (critical) or Sev2 (high) violations in changed
+  files — lower severities are visible but non-blocking. The action always
+  creates a brand-new summary review every run (no built-in way to update a
+  previous one); `scripts/ci/collapse-stale-reviews.mjs` runs first each
+  time to collapse any earlier run's summary body to a placeholder, since
+  GitHub has no delete endpoint for a review's own body — only one live
+  summary is visible at a time, not a growing pile.
 - **secret-scan** — gitleaks over the PR's diff range.
 - **deploy-validate** — `sf project deploy validate` against the delta
   package, running Apex tests at the branch's configured test level.
