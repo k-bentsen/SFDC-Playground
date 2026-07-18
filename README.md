@@ -118,8 +118,11 @@ Flow Test metadata in the deploy package.
 - **Flow Tests** — not a separate job. Any changed Flow's associated Flow
   Test metadata is pulled into the delta package by
   `scripts/ci/resolve-flow-tests.mjs`; Salesforce runs Flow Tests
-  automatically during deploy/validate when that metadata is present. Active
-  flows with no matching Flow Test fail the check; draft flows are exempt.
+  automatically during deploy/validate when that metadata is present.
+  Opt-in, not a gate: a changed Flow with no matching Flow Test is skipped,
+  not treated as a failure. Pass/fail only comes into play once a Flow Test
+  actually gets included and the platform runs it as part of
+  deploy/validate.
 
 ## Known caveats to verify before relying on this in production
 
