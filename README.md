@@ -79,6 +79,12 @@ critical only. Independent of both, the check still fails the PR on any
 critical/high violation in changed files, regardless of whether
 `inlineComments` is on.
 
+Each push re-scans the PR's full cumulative delta (base branch to current
+HEAD), but comments are scoped to just that push's changes, not the full
+delta - otherwise every push would re-comment on violations already posted
+for earlier commits. This only applies to comments; the severity gate and
+job summary still reflect the full delta.
+
 `sourceDir` is repo-wide (top-level, not per-branch) — it's the path both
 `validate.yml` and `deploy.yml` check for relevant changes before doing any
 of the expensive CLI/plugin install work, and defaults to `force-app` if

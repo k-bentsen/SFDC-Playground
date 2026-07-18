@@ -16,8 +16,16 @@
 // comment API behavior for out-of-diff lines are both worth re-verifying
 // against a real run - every API failure is logged with its response body
 // below, so check the job log first if comments aren't showing up.
+//
+// When INCREMENTAL_BASE is set (a synchronize push to an already-open PR),
+// comments are further filtered to violations on lines that changed since
+// that previous push - otherwise every push re-comments on the PR's full
+// cumulative delta, including violations already posted for earlier
+// commits. When unset (first run on this PR), every violation in the delta
+// is eligible, same as before this filter existed.
 
 import { readFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 
 const RESULTS_FILE = process.env.RESULTS_FILE || 'sfca_results.json';
 const MIN_SEVERITY = process.env.MIN_SEVERITY;
@@ -25,6 +33,7 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const REPO = process.env.GITHUB_REPOSITORY;
 const PR_NUMBER = process.env.PR_NUMBER;
 const HEAD_SHA = process.env.HEAD_SHA;
+const INCREMENTAL_BASE = process.env.INCREMENTAL_BASE;
 
 // 1 = most severe. "medium" covers medium/high/critical (severity <= 3);
 // "critical" covers only critical (severity <= 1).
@@ -60,7 +69,7 @@ function toRepoPath(file) {
 
 const SEVERITY_LABEL = { 1: 'Critical', 2: 'High', 3: 'Moderate', 4: 'Low', 5: 'Info' };
 
-const comments = violations
+let comments = violations
   .filter((v) => v.severity <= threshold)
   .map((v) => {
     const loc = v.locations[v.primaryLocationIndex ?? 0];
@@ -75,6 +84,50 @@ const comments = violations
       body: `**${SEVERITY_LABEL[v.severity] ?? v.severity} · ${ruleText}** (${v.engine})\n\n${v.message}`,
     };
   });
+
+// Parses `git diff --unified=0`'s hunk headers (@@ -a,b +c,d @@) into a
+// path -> Set(line numbers added/changed on the new side) map. Used to
+// restrict comments to only lines that changed in this push.
+function computeEligibleLines(base, head) {
+  const diffOutput = execFileSync('git', ['diff', '--unified=0', base, head], {
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024 * 50,
+  });
+  const eligible = new Map();
+  let currentFile = null;
+  for (const line of diffOutput.split('\n')) {
+    if (line.startsWith('+++ ')) {
+      const raw = line.slice(4).trim();
+      currentFile = raw === '/dev/null' ? null : raw.replace(/^b\//, '');
+      if (currentFile && !eligible.has(currentFile)) eligible.set(currentFile, new Set());
+      continue;
+    }
+    if (line.startsWith('@@ ') && currentFile) {
+      const m = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
+      if (m) {
+        const start = Number(m[1]);
+        const count = m[2] !== undefined ? Number(m[2]) : 1;
+        const lines = eligible.get(currentFile);
+        for (let i = 0; i < count; i++) lines.add(start + i);
+      }
+    }
+  }
+  return eligible;
+}
+
+if (INCREMENTAL_BASE) {
+  try {
+    const eligible = computeEligibleLines(INCREMENTAL_BASE, HEAD_SHA);
+    const before = comments.length;
+    comments = comments.filter((c) => eligible.get(c.path)?.has(c.line));
+    console.log(
+      `Incremental diff (${INCREMENTAL_BASE.slice(0, 7)}..${HEAD_SHA.slice(0, 7)}): ` +
+        `${comments.length} of ${before} violation(s) are on lines changed in this push.`
+    );
+  } catch (err) {
+    console.log(`Could not compute incremental diff, commenting on the full delta instead: ${err.message}`);
+  }
+}
 
 if (comments.length === 0) {
   console.log(`No violations at or above severity "${MIN_SEVERITY}" - no comments to post.`);
