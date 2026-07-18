@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - id: load
         run: node scripts/ci/resolve-config.mjs "${{ github.base_ref }}"
 
@@ -33,53 +33,162 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Install Salesforce CLI
-        run: npm install --global @salesforce/cli
-      - name: Install sfdx-git-delta
-        run: sf plugins install sfdx-git-delta
+      # actions/checkout narrows the origin fetch refspec to just the PR's
+      # head branch, so a plain `git fetch origin <base>` only populates
+      # FETCH_HEAD, not refs/remotes/origin/<base> - sgd then can't resolve
+      # "origin/<base>" and silently diffs against nothing. Fetch into an
+      # explicit ref instead. Repo is already unshallowed (fetch-depth: 0
+      # above), so no --depth here.
       - name: Fetch base branch
-        run: git fetch origin "${{ github.base_ref }}" --depth=1
+        run: git fetch origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+      # Cheap check before any of the expensive CLI/plugin installs below:
+      # if nothing under the configured source directory changed, there's
+      # nothing for sgd to find either. sourceDir is configurable via
+      # .github/ci-config.json for non-default SFDX layouts.
+      - id: check
+        name: Check for relevant changes
+        run: |
+          SOURCE_DIR="${{ fromJSON(needs.resolve-config.outputs.config).sourceDir }}"
+          if git diff --quiet "origin/${{ github.base_ref }}" HEAD -- "$SOURCE_DIR"; then
+            echo "No changes under $SOURCE_DIR."
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.relevant == 'true'
+        with:
+          node-version: 22
+      - name: Install Salesforce CLI
+        if: steps.check.outputs.relevant == 'true'
+        run: npm install --global @salesforce/cli
+      # --force alone does not suppress the "isn't signed by Salesforce, do
+      # you trust it?" prompt on this plugin - pipe an answer directly in.
+      - name: Install sfdx-git-delta
+        if: steps.check.outputs.relevant == 'true'
+        run: yes | sf plugins install sfdx-git-delta --force
       - id: gen
         name: Generate delta
         run: |
-          sf sgd:source:delta --to HEAD --from "origin/${{ github.base_ref }}" --output .delta --generate-delta
-          if [ -s .delta/package/package.xml ]; then
+          if [ "${{ steps.check.outputs.relevant }}" != "true" ]; then
+            echo "hasChanges=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p delta_output
+          sf sgd:source:delta --to HEAD --from "origin/${{ github.base_ref }}" --output-dir delta_output --generate-delta
+          # sgd always writes a well-formed package.xml (with just the XML
+          # boilerplate) even when zero components changed, so checking
+          # file existence/non-emptiness is never a reliable signal - check
+          # for an actual <types> entry instead.
+          if grep -q '<types>' delta_output/package/package.xml 2>/dev/null || grep -q '<types>' delta_output/destructiveChanges/destructiveChanges.xml 2>/dev/null; then
             echo "hasChanges=true" >> "$GITHUB_OUTPUT"
           else
             echo "hasChanges=false" >> "$GITHUB_OUTPUT"
           fi
+      # A leading-dot directory name (the original .delta) tripped up
+      # upload-artifact's internal file discovery - it reported "No files
+      # were found" even though the files verifiably existed on disk.
+      # delta_output (no leading dot) avoids that.
       - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.relevant == 'true'
         with:
           name: delta
-          path: .delta
+          path: delta_output
 
   static-analysis:
     needs: [resolve-config, delta]
-    if: fromJSON(needs.resolve-config.outputs.config).checks.staticAnalysis && needs.delta.outputs.hasChanges == 'true'
+    if: fromJSON(needs.resolve-config.outputs.config).checks.staticAnalysis.enabled && needs.delta.outputs.hasChanges == 'true'
     runs-on: ubuntu-latest
+    # contents:read for checkout/artifact download; pull-requests:write for
+    # the PR review comment forcedotcom/run-code-analyzer posts. Job-scoped
+    # permissions replace the workflow default entirely, so both must be
+    # listed even though contents:read alone would otherwise be implicit.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
+      # fetch-depth: 0 so github.event.before (the previous push's HEAD, used
+      # below to scope inline comments to just this push) is guaranteed to be
+      # present locally, including after a force-push where it may not be an
+      # ancestor of the new HEAD.
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
         with:
-          name: delta
-          path: .delta
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-      # Command/plugin name reflects Salesforce Code Analyzer as of this
-      # writing (PMD rules for Apex, ESLint for LWC/Aura). Confirm current
-      # plugin name and flags against `sf plugins` docs before relying on this
-      # - this surface has been renamed across CLI versions.
-      - name: Install Salesforce Code Analyzer
-        run: npm install --global @salesforce/cli @salesforce/plugin-code-analyzer
-      - name: Run analysis on changed files
-        run: sf code-analyzer run --workspace .delta/force-app --output-file analysis-results.json
-      - name: Show results on failure
-        if: failure()
-        run: cat analysis-results.json
+          node-version: 22
+      - name: Install Salesforce CLI
+        run: npm install --global @salesforce/cli
+      - name: Install Code Analyzer plugin
+        run: sf plugins install code-analyzer@latest
+      # forcedotcom/run-code-analyzer always creates a brand-new PR review
+      # every run - it has no way to detect or update a previous one, so
+      # without this, every push leaves another full summary review behind.
+      # Collapses any earlier run's summary review body (identified by
+      # author + having a non-empty top-level body - our own inline-comment
+      # reviews below never set one) to a short placeholder. GitHub has no
+      # delete endpoint for a review's own body, only update, so this
+      # can't remove them outright - only keep the noise down to one live
+      # summary at a time.
+      - name: Collapse previous analyzer summary reviews
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node scripts/ci/collapse-stale-reviews.mjs
+      # forcedotcom/run-code-analyzer (Salesforce's own action) posts a PR
+      # review comment summarizing violations, publishes a GitHub Actions
+      # job summary with the full detail view, and uploads the HTML/JSON
+      # report as a workflow artifact - no need to hand-parse results.
+      #
+      # --workspace scans the real checkout (not a delta copy): the
+      # action's own "violations in changed files" outputs cross-reference
+      # scanned file paths against GitHub's actual PR-changed-files list,
+      # which only works if the paths match - a delta_output/-prefixed
+      # workspace broke that matching entirely (every run reported "0
+      # files changed" and the severity gate below was silently never
+      # triggering). Scanning the whole source tree and letting the
+      # action's own PR-diff cross-referencing do the scoping is also
+      # what Salesforce's own example workflow does.
+      - name: Run Salesforce Code Analyzer
+        id: analyze
+        uses: forcedotcom/run-code-analyzer@v2
+        with:
+          run-arguments: --workspace ${{ fromJSON(needs.resolve-config.outputs.config).sourceDir }} --view detail --output-file sfca_results.html --output-file sfca_results.json
+          results-artifact-name: static-analysis-results
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      # On synchronize (a new push to an already-open PR), scope inline
+      # comments to just what changed in this push rather than the PR's
+      # full cumulative delta - otherwise every push re-comments on
+      # already-reviewed violations from earlier commits, piling up noise.
+      # On opened/reopened/ready_for_review there's no previous push to
+      # diff against, so INCREMENTAL_BASE is left empty and every violation
+      # in the delta is eligible, same as before.
+      - name: Fetch previous push HEAD for incremental diff
+        if: github.event.action == 'synchronize'
+        run: git fetch origin ${{ github.event.before }} || true
+      # Posts a review comment on each violation's specific line, filtered
+      # to fromJSON(...).checks.staticAnalysis.inlineComments.minSeverity
+      # and above (critical/high/medium/low/info). Best-effort: a line
+      # outside this PR's diff can't be commented on inline by GitHub, see
+      # the script for the fallback behavior.
+      - name: Post inline PR comments
+        if: fromJSON(needs.resolve-config.outputs.config).checks.staticAnalysis.inlineComments.enabled
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MIN_SEVERITY: ${{ fromJSON(needs.resolve-config.outputs.config).checks.staticAnalysis.inlineComments.minSeverity }}
+          RESULTS_FILE: sfca_results.json
+          INCREMENTAL_BASE: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
+        run: node scripts/ci/post-inline-comments.mjs
+      # Only Sev1 (critical) / Sev2 (high) violations in changed files
+      # block the PR; lower severities stay visible in the report (PR
+      # comment / job summary / artifact above) without blocking merge.
+      - name: Fail on critical/high violations
+        if: |
+          steps.analyze.outputs.num-sev1-violations-in-changed-files > 0 ||
+          steps.analyze.outputs.num-sev2-violations-in-changed-files > 0
+        run: exit 1
 
   secret-scan:
     needs: resolve-config
@@ -107,10 +216,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: delta
-          path: .delta
+          path: delta_output
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Install Salesforce CLI
         run: npm install --global @salesforce/cli
       - name: Include Flow Tests for changed flows
@@ -130,22 +239,34 @@ jobs:
           if [ "$LEVEL" = "RunSpecifiedTests" ]; then
             TESTS="${{ steps.tests.outputs.tests }}"
             if [ -z "$TESTS" ]; then
-              echo "RunSpecifiedTests requested but no tests were resolved - failing closed."
-              exit 1
+              # resolve-tests.mjs already fails its own step (non-zero exit)
+              # when Apex changed with no covering test - reaching here with
+              # an empty list means the delta has no Apex at all. NoTestRun
+              # is not a valid --test-level value on current sf CLI (only
+              # RunAllTestsInOrg/RunLocalTests/RunSpecifiedTests/
+              # RunRelevantTests are); per Salesforce docs, --test-level can
+              # simply be omitted when the deployment contains no Apex.
+              echo "No Apex in the delta - omitting --test-level."
+              sf project deploy validate --source-dir delta_output/force-app --wait 33
+            else
+              # $TESTS is intentionally unquoted: resolve-tests.mjs emits
+              # space-separated names, and current sf CLI expects --tests
+              # as space-separated names (a single quoted/comma-joined
+              # string is treated as one nonexistent test name).
+              sf project deploy validate --source-dir delta_output/force-app --test-level RunSpecifiedTests --tests $TESTS --wait 33
             fi
-            sf project deploy validate --source-dir .delta/force-app --test-level RunSpecifiedTests --tests "$TESTS" --wait 33
           else
-            sf project deploy validate --source-dir .delta/force-app --test-level "$LEVEL" --wait 33
+            sf project deploy validate --source-dir delta_output/force-app --test-level "$LEVEL" --wait 33
           fi
 
   pr-gate:
-    needs: [static-analysis, secret-scan, deploy-validate]
+    needs: [resolve-config, delta, static-analysis, secret-scan, deploy-validate]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Evaluate enabled check results
         run: |
-          for result in "${{ needs.static-analysis.result }}" "${{ needs.secret-scan.result }}" "${{ needs.deploy-validate.result }}"; do
+          for result in "${{ needs.resolve-config.result }}" "${{ needs.delta.result }}" "${{ needs.static-analysis.result }}" "${{ needs.secret-scan.result }}" "${{ needs.deploy-validate.result }}"; do
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
               echo "A required check failed or was cancelled."
               exit 1

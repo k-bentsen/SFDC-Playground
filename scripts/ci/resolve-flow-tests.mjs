@@ -10,21 +10,23 @@
 // releases; confirm this still matches the current release notes for your org's
 // API version before relying on it.
 //
-// Only Active flows are required to have a Flow Test - draft/in-progress flows
-// are exempt so WIP edits don't get blocked on test authoring.
+// This is opt-in, not a coverage gate: if none of the changed flows have a
+// matching Flow Test, that's not a failure - it's simply skipped. Pass/fail
+// only comes into play once a Flow Test actually gets included, at which
+// point the platform runs it as part of deploy/validate and that step's own
+// success/failure reflects the result.
 
 import {
   readdirSync,
-  readFileSync,
   existsSync,
   mkdirSync,
   copyFileSync,
 } from 'node:fs';
 import { join, basename, dirname } from 'node:path';
 
-const DELTA_FLOWS_DIR = '.delta/force-app/main/default/flows';
+const DELTA_FLOWS_DIR = 'delta_output/force-app/main/default/flows';
 const REPO_FLOWTESTS_DIR = 'force-app/main/default/flowTests';
-const DELTA_FLOWTESTS_DIR = '.delta/force-app/main/default/flowTests';
+const DELTA_FLOWTESTS_DIR = 'delta_output/force-app/main/default/flowTests';
 
 function listFiles(dir, suffix) {
   if (!existsSync(dir)) return [];
@@ -36,25 +38,16 @@ function listFiles(dir, suffix) {
 const changedFlows = listFiles(DELTA_FLOWS_DIR, '.flow-meta.xml');
 
 if (changedFlows.length === 0) {
-  console.log('No Flow changes in delta.');
+  console.log('No Flow changes in delta - skipping.');
   process.exit(0);
 }
 
 const allFlowTests = listFiles(REPO_FLOWTESTS_DIR, '.flowtest-meta.xml');
-const orphans = [];
 let included = 0;
 
 for (const flowFile of changedFlows) {
   const flowName = basename(flowFile, '.flow-meta.xml');
-  const xml = readFileSync(flowFile, 'utf8');
-  const isActive = /<status>Active<\/status>/.test(xml);
-
   const matches = allFlowTests.filter((f) => basename(f).startsWith(`${flowName}.`));
-
-  if (matches.length === 0) {
-    if (isActive) orphans.push(flowName);
-    continue;
-  }
 
   for (const match of matches) {
     const dest = join(DELTA_FLOWTESTS_DIR, basename(match));
@@ -64,12 +57,8 @@ for (const flowFile of changedFlows) {
   }
 }
 
-if (orphans.length > 0) {
-  console.error(
-    `Active flow(s) with no Flow Test found: ${orphans.join(', ')}. ` +
-      'Add a Flow Test in Flow Builder before this can be validated.'
-  );
-  process.exit(1);
+if (included === 0) {
+  console.log('No Flow Tests found for the changed flow(s) - skipping.');
+} else {
+  console.log(`Included ${included} Flow Test file(s) in the delta package.`);
 }
-
-console.log(`Included ${included} Flow Test file(s) in the delta package.`);

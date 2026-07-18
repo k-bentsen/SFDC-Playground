@@ -27,13 +27,17 @@ if (!entry) {
   process.exit(1);
 }
 
+// sourceDir is a repo-wide setting (top-level, not per-branch) - defaults to
+// "force-app" for a standard SFDX layout.
+const merged = { ...entry, sourceDir: config.sourceDir || 'force-app' };
+
 const lines = [
-  `config=${JSON.stringify(entry)}`,
+  `config=${JSON.stringify(merged)}`,
   `org=${entry.org}`,
   `testLevel=${entry.testLevel}`,
 ];
 
-console.log(`Resolved config for "${branch}":`, entry);
+console.log(`Resolved config for "${branch}":`, merged);
 
 const output = process.env.GITHUB_OUTPUT;
 if (output) {
