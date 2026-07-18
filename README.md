@@ -12,7 +12,9 @@ configurable checks.
 | `staging` | `uat`                      | RunSpecifiedTests |
 | `master`  | `production`               | RunLocalTests     |
 
-Feature branches PR into `dev`. Promote via `dev` → `staging` → `master` PRs.
+Feature branches PR into `dev`. Promote via `dev` → `staging` → `master` PRs
+— see [Promoting changes](#promoting-changes) below for how those PRs get
+created.
 
 ## One-time setup
 
@@ -40,6 +42,40 @@ is later refreshed, its auth URL is invalidated and needs regenerating.
 On `dev`, `staging`, and `master`: require the `pr-gate` status check to
 pass before merging, and require a PR (no direct pushes). `pr-gate` is the
 only check you ever need to name in branch protection — see below.
+
+### 4. Require reviewer approval on master
+
+`dev` and `staging` merge on checks passing alone. `master` (production)
+additionally requires at least one approving review before merging — a
+deliberate human checkpoint before anything reaches production, on top of
+(not instead of) the same `pr-gate` check. Configured as a separate
+ruleset targeting only `master`, since GitHub rulesets apply uniformly to
+every branch they target — `dev`/`staging` and `master` can't share one
+ruleset once their required-approval counts differ.
+
+## Promoting changes
+
+Actions tab → **Promote** → Run workflow → pick `staging` or `master` as
+the target. This opens a PR merging `dev` → `staging` or `staging` →
+`master` (real `git merge`, never a cherry-pick — see below for why that
+matters) with a changelog of the commits being promoted. The PR itself
+still has to pass the normal `pr-gate` checks — and, for `master`, a
+reviewer approval — like any other PR into these branches; the workflow
+only opens it.
+
+Re-running the workflow while a promotion PR is still open updates that
+same PR (force-pushes the same `promote/<source>-to-<target>` branch)
+rather than opening a duplicate.
+
+**Always promote through this workflow (or an equivalent real `git merge`),
+never by cherry-picking or re-applying a fix branch's commits directly onto
+`staging`/`master`.** Doing the latter creates a commit with the same
+content but a different hash than the one already on `dev`/`staging`, so
+git has no shared ancestry to reconcile on the *next* merge — it sees the
+same lines edited independently on both sides and produces a conflict, even
+though the intended end state matches. If a promotion PR does hit a real
+conflict, the workflow fails with instructions to resolve it locally rather
+than guessing.
 
 ## How the per-branch check toggles work
 

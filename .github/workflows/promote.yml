@@ -1,0 +1,108 @@
+name: Promote
+
+# Manual button (Actions tab -> Promote -> Run workflow) that opens a PR
+# merging one environment branch up into the next: dev -> staging or
+# staging -> master. Always a real `git merge`, never a cherry-pick or
+# rebase - that's what keeps these branches' histories compatible and
+# avoids the phantom-conflict problem where re-applying the same change as
+# a brand-new commit on both sides makes git treat it as two independent
+# edits to the same lines on the next merge.
+#
+# This workflow only opens the PR; it doesn't merge or deploy anything
+# itself. The PR still has to pass the normal pr-gate checks (and, for
+# master, a required reviewer approval) like any other PR into these
+# branches.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Promote into which branch?'
+        required: true
+        type: choice
+        options:
+          - staging
+          - master
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine source branch
+        id: source
+        run: |
+          if [ "${{ inputs.target }}" = "staging" ]; then
+            echo "branch=dev" >> "$GITHUB_OUTPUT"
+          else
+            echo "branch=staging" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check for changes to promote
+        id: check
+        run: |
+          git fetch origin "${{ steps.source.outputs.branch }}" "${{ inputs.target }}"
+          count=$(git rev-list --count "origin/${{ inputs.target }}..origin/${{ steps.source.outputs.branch }}")
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          if [ "$count" -eq 0 ]; then
+            echo "Nothing to promote - origin/${{ inputs.target }} already has everything from origin/${{ steps.source.outputs.branch }}."
+          fi
+
+      - name: Create promotion branch
+        if: steps.check.outputs.count != '0'
+        id: branch
+        env:
+          SOURCE: ${{ steps.source.outputs.branch }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          name="promote/${SOURCE}-to-${TARGET}"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          git checkout -B "$name" "origin/$TARGET"
+          if ! git merge "origin/$SOURCE" --no-ff -m "Merge $SOURCE into $TARGET"; then
+            git merge --abort
+            echo "::error::Merge conflict promoting $SOURCE into $TARGET - this needs a human to resolve. Locally: git checkout -b $name origin/$TARGET && git merge origin/$SOURCE, fix conflicts, push, then open the PR by hand."
+            exit 1
+          fi
+          git push -f origin "$name"
+
+      - name: Generate changelog
+        if: steps.check.outputs.count != '0'
+        id: changelog
+        env:
+          SOURCE: ${{ steps.source.outputs.branch }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          {
+            echo "log<<CHANGELOG_EOF"
+            git log --pretty='- %s (%h)' "origin/$TARGET..origin/$SOURCE"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open or update promotion PR
+        if: steps.check.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+          SOURCE: ${{ steps.source.outputs.branch }}
+          TARGET: ${{ inputs.target }}
+          CHANGELOG: ${{ steps.changelog.outputs.log }}
+        run: |
+          existing=$(gh pr list --head "$BRANCH" --base "$TARGET" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            echo "Pushed new commits to existing PR #$existing."
+          else
+            gh pr create --base "$TARGET" --head "$BRANCH" \
+              --title "Promote $SOURCE → $TARGET" \
+              --body "Commits being promoted from \`$SOURCE\` to \`$TARGET\`:
+
+          $CHANGELOG"
+          fi
