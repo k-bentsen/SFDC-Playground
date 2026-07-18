@@ -79,6 +79,12 @@ critical only. Independent of both, the check still fails the PR on any
 critical/high violation in changed files, regardless of whether
 `inlineComments` is on.
 
+Each push re-scans the PR's full cumulative delta (base branch to current
+HEAD), but comments are scoped to just that push's changes, not the full
+delta - otherwise every push would re-comment on violations already posted
+for earlier commits. This only applies to comments; the severity gate and
+job summary still reflect the full delta.
+
 `sourceDir` is repo-wide (top-level, not per-branch) — it's the path both
 `validate.yml` and `deploy.yml` check for relevant changes before doing any
 of the expensive CLI/plugin install work, and defaults to `force-app` if
@@ -106,20 +112,31 @@ Flow Test metadata in the deploy package.
 ## Checks
 
 - **static-analysis** — Salesforce Code Analyzer (PMD for Apex, ESLint for
-  LWC/Aura), scoped to the delta, via the official
-  `forcedotcom/run-code-analyzer` action. Posts a PR review comment
-  summarizing violations, publishes the full detail view as a GitHub
-  Actions job summary, and uploads an HTML/JSON report as a workflow
-  artifact. Only blocks the PR on Sev1 (critical) or Sev2 (high) violations
-  in changed files — lower severities are visible but non-blocking.
+  LWC/Aura), via the official `forcedotcom/run-code-analyzer` action. Scans
+  the real checkout at `sourceDir` (not a delta copy) — the action's
+  "violations in changed files" outputs work by cross-referencing scanned
+  file paths against GitHub's actual PR-changed-files list, which only
+  works if the paths match. Posts a PR review comment summarizing
+  violations, publishes the full detail view as a GitHub Actions job
+  summary, and uploads an HTML/JSON report as a workflow artifact. Only
+  blocks the PR on Sev1 (critical) or Sev2 (high) violations in changed
+  files — lower severities are visible but non-blocking. The action always
+  creates a brand-new summary review every run (no built-in way to update a
+  previous one); `scripts/ci/collapse-stale-reviews.mjs` runs first each
+  time to collapse any earlier run's summary body to a placeholder, since
+  GitHub has no delete endpoint for a review's own body — only one live
+  summary is visible at a time, not a growing pile.
 - **secret-scan** — gitleaks over the PR's diff range.
 - **deploy-validate** — `sf project deploy validate` against the delta
   package, running Apex tests at the branch's configured test level.
 - **Flow Tests** — not a separate job. Any changed Flow's associated Flow
   Test metadata is pulled into the delta package by
   `scripts/ci/resolve-flow-tests.mjs`; Salesforce runs Flow Tests
-  automatically during deploy/validate when that metadata is present. Active
-  flows with no matching Flow Test fail the check; draft flows are exempt.
+  automatically during deploy/validate when that metadata is present.
+  Opt-in, not a gate: a changed Flow with no matching Flow Test is skipped,
+  not treated as a failure. Pass/fail only comes into play once a Flow Test
+  actually gets included and the platform runs it as part of
+  deploy/validate.
 
 ## Known caveats to verify before relying on this in production
 
