@@ -114,10 +114,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
-        with:
-          name: delta
-          path: delta_output
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -125,15 +121,39 @@ jobs:
         run: npm install --global @salesforce/cli
       - name: Install Code Analyzer plugin
         run: sf plugins install code-analyzer@latest
+      # forcedotcom/run-code-analyzer always creates a brand-new PR review
+      # every run - it has no way to detect or update a previous one, so
+      # without this, every push leaves another full summary review behind.
+      # Collapses any earlier run's summary review body (identified by
+      # author + having a non-empty top-level body - our own inline-comment
+      # reviews below never set one) to a short placeholder. GitHub has no
+      # delete endpoint for a review's own body, only update, so this
+      # can't remove them outright - only keep the noise down to one live
+      # summary at a time.
+      - name: Collapse previous analyzer summary reviews
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node scripts/ci/collapse-stale-reviews.mjs
       # forcedotcom/run-code-analyzer (Salesforce's own action) posts a PR
       # review comment summarizing violations, publishes a GitHub Actions
       # job summary with the full detail view, and uploads the HTML/JSON
       # report as a workflow artifact - no need to hand-parse results.
+      #
+      # --workspace scans the real checkout (not a delta copy): the
+      # action's own "violations in changed files" outputs cross-reference
+      # scanned file paths against GitHub's actual PR-changed-files list,
+      # which only works if the paths match - a delta_output/-prefixed
+      # workspace broke that matching entirely (every run reported "0
+      # files changed" and the severity gate below was silently never
+      # triggering). Scanning the whole source tree and letting the
+      # action's own PR-diff cross-referencing do the scoping is also
+      # what Salesforce's own example workflow does.
       - name: Run Salesforce Code Analyzer
         id: analyze
         uses: forcedotcom/run-code-analyzer@v2
         with:
-          run-arguments: --workspace delta_output/force-app --view detail --output-file sfca_results.html --output-file sfca_results.json
+          run-arguments: --workspace ${{ fromJSON(needs.resolve-config.outputs.config).sourceDir }} --view detail --output-file sfca_results.html --output-file sfca_results.json
           results-artifact-name: static-analysis-results
           github-token: ${{ secrets.GITHUB_TOKEN }}
       # On synchronize (a new push to an already-open PR), scope inline
