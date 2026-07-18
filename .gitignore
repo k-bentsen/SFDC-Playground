@@ -1,7 +1,8 @@
 node_modules/
 .sf/
 .sfdx/
-.delta/
+delta_output/
 *.log
 authfile
 .claude/
+.DS_Store
