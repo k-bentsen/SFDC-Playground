@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomLabels xmlns="http://soap.sforce.com/2006/04/metadata">
+    <labels>
+        <fullName>OLP_24_Hour_Batch_Size</fullName>
+        <language>en_US</language>
+        <protected>false</protected>
+        <shortDescription>OLP 24 Hour Batch Size</shortDescription>
+        <value>25</value>
+    </labels>
+</CustomLabels>

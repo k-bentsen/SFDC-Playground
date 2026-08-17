@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>DML_Operation__c</fullName>
+    <label>DML Operation</label>
+    <required>false</required>
+    <trackHistory>true</trackHistory>
+    <trackTrending>false</trackTrending>
+    <type>Picklist</type>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>INS</fullName>
+                <default>false</default>
+                <label>INS</label>
+            </value>
+            <value>
+                <fullName>UPDT</fullName>
+                <default>false</default>
+                <label>UPDT</label>
+            </value>
+            <value>
+                <fullName>UPST</fullName>
+                <default>false</default>
+                <label>UPST</label>
+            </value>
+            <value>
+                <fullName>DLT</fullName>
+                <default>false</default>
+                <label>DLT</label>
+            </value>
+            <value>
+                <fullName>UNDLT</fullName>
+                <default>false</default>
+                <label>UNDLT</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>
